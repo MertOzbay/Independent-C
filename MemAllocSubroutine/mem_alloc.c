@@ -1,12 +1,16 @@
 
-#include "my_malloc.h"
-//#include <stdlib.h>
+#include "men_alloc.h"
+#include <stdlib.h>
+#include <unistd.h>
 
 static FreeNode * head;
 
-void *my_malloc(uint32_t size)
+oid *my_malloc(uint32_t size)
 {
-  void * ptr;
+  if (size == 0) return NULL;
+  size += CHUNKHEADERSIZE;
+  if (size%8 != 0) size += (8-(size%8));
+
   if (head==0)
     return my_malloc_heap(size);
 
@@ -15,7 +19,6 @@ void *my_malloc(uint32_t size)
 
   return my_malloc_node(size, chunk);
 }
-
 void my_free(void *ptr)
 {
   if (ptr == 0 ) {
@@ -30,7 +33,7 @@ void my_free(void *ptr)
     *(((uint32_t *)ptr)-2) = 0;
     ptr = (uint32_t *)ptr-2;
     FreeNode * node = (FreeNode *) ptr;
-    add_free_node(head,node, size);
+    add_free_node(node, size);
   } else {
     printf("ERROR: trying to free non-allocated chunk\n");
     exit(1);
@@ -55,6 +58,7 @@ void coalesce_free_list()
     if (try == next){
       curr->size = size + next->size;
       curr->flink = next -> flink;
+      continue;
     }
 
     curr = next;
@@ -66,16 +70,23 @@ void *my_malloc_heap(uint32_t size) {
   void * ptr = sbrk(0);
   uint32_t sbrk_size = 8192;
   uint32_t mag_num = 99999999;
-  size = size + CHUNKHEADERSIZE + (size%8);
 
   if (size>sbrk_size)
   {
     sbrk_size = size;
-    sbrk(sbrk_size);
+    uint32_t sbrk_result = sbrk(sbrk_size);
+    if (sbrk_result<0) {
+      printf("ERROR: no memory available!\n");
+      exit(1);
+    }
   }
   else
   {
-    sbrk(sbrk_size);
+    uint32_t sbrk_result = sbrk(sbrk_size);
+    if (sbrk_result<0) {
+      printf("ERROR: no memory available!\n");
+      exit(1);
+    }
 
     size = split_chunk(ptr, sbrk_size, size);
   }
@@ -86,26 +97,23 @@ void *my_malloc_heap(uint32_t size) {
 }
 
 uint32_t split_chunk(void *ptr, uint32_t chunk_size, uint32_t alloc_size){
-  uint32_t init_chunk_size = chunk_size;
+  uint32_t free_node_size = 0;
 
-  while((chunk_size)/2>=(alloc_size) && chunk_size>31) {
-    chunk_size /= 2;
+  if (chunk_size >= alloc_size*2){
+    free_node_size = (chunk_size-alloc_size);
   }
-  chunk_size += chunk_size%8;
 
-  void * free_node_begin = (ptr + chunk_size);
-  uint32_t free_node_size = init_chunk_size - chunk_size;
+  FreeNode * free_node_begin = (FreeNode *) (ptr + alloc_size);
+
 
   if (free_node_size > 15){
-    add_free_node(head,(FreeNode *) free_node_begin, free_node_size);
-  } else {
-    chunk_size += free_node_size;
+    add_free_node(free_node_begin, free_node_size);
   }
 
-  return chunk_size;
+  return alloc_size;
 }
 
-void add_free_node(FreeNode * head, FreeNode * free_node_begin, uint32_t free_node_size) {
+void add_free_node(FreeNode * free_node_begin, uint32_t free_node_size) {
 
   free_node_begin->size = free_node_size;
 
@@ -115,14 +123,19 @@ void add_free_node(FreeNode * head, FreeNode * free_node_begin, uint32_t free_no
   }
   else
   {
-    FreeNode * curr = head;
-    FreeNode * next = head -> flink;
-    while (curr<free_node_begin && next != 0){
-      curr = next;
-      next = curr -> flink;
+    if (head>free_node_begin){
+      free_node_begin ->flink = head;
+      head = free_node_begin;
+    } else {
+      FreeNode * curr = head;
+      FreeNode * next = head -> flink;
+      while (curr<free_node_begin && next != 0){
+        curr = next;
+        next = curr -> flink;
+      }
+      curr -> flink = free_node_begin;
+      free_node_begin -> flink = next;
     }
-    curr -> flink = free_node_begin;
-    free_node_begin -> flink = next;
   }
 
 }
@@ -131,7 +144,7 @@ FreeNode * find_free_chunk(uint32_t size){
   FreeNode * prev = head;
   FreeNode * curr = prev -> flink;
   while(curr != 0){
-    if (curr->size >= size + CHUNKHEADERSIZE + (size%8)) {
+    if (curr->size >= size ) {
       prev ->flink = curr -> flink;
       return curr;
     }
@@ -144,7 +157,6 @@ FreeNode * find_free_chunk(uint32_t size){
 }
 
 void *my_malloc_node(uint32_t size, FreeNode * chunk){
-  size = size + CHUNKHEADERSIZE + (size%8);
   void * ptr;
   uint32_t mag_num = 99999999;
 

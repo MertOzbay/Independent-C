@@ -34,7 +34,7 @@ void *my_malloc_heap(uint32_t);
 uint32_t split_chunk(void *, uint32_t, uint32_t);
 
 //add_free_node(): adds deallocated memory or extra space from split_chunk() to the free list. order is based on memory location.
-void add_free_node(FreeNode *, FreeNode *, uint32_t);
+void add_free_node(FreeNode *, uint32_t);
 
 //find_free_chunk(): looks for a free node of sufficient size for memory allocation. returns the first appropriate free node. returns null if no node is found.
 FreeNode * find_free_chunk(uint32_t);
